@@ -1,0 +1,171 @@
+import socket
+import requests
+import whois
+from bs4 import BeautifulSoup
+import tkinter as tk
+from tkinter import scrolledtext, messagebox
+
+# ---------------- Variables globales ----------------
+DARK_MODE = False  # Para controlar el modo oscuro
+
+# ---------------- Funciones de análisis ----------------
+
+def get_ip(domain):
+    """Obtener la dirección IP del dominio."""
+    try:
+        return socket.gethostbyname(domain)
+    except Exception as e:
+        return f"Error al obtener IP: {e}"
+
+def get_headers(domain):
+    """Obtener los headers HTTP del dominio."""
+    try:
+        response = requests.get(f"http://{domain}", timeout=5)
+        return dict(response.headers)
+    except Exception as e:
+        return f"Error al obtener headers: {e}"
+
+def get_whois_info(domain):
+    """Obtener información WHOIS del dominio."""
+    try:
+        w = whois.whois(domain)
+        return {
+            "Dominio": w.domain_name,
+            "Registrador": w.registrar,
+            "Creación": w.creation_date,
+            "Expiración": w.expiration_date,
+            "Emails": w.emails,
+            "DNS": w.name_servers
+        }
+    except Exception as e:
+        return f"Error al obtener WHOIS: {e}"
+
+def get_meta_tags(domain):
+    """Extraer las meta etiquetas del HTML del dominio."""
+    try:
+        response = requests.get(f"http://{domain}", timeout=5)
+        soup = BeautifulSoup(response.text, "html.parser")
+        metas = {}
+        for tag in soup.find_all("meta"):
+            if "name" in tag.attrs and "content" in tag.attrs:
+                metas[tag.attrs["name"]] = tag.attrs["content"]
+            elif "property" in tag.attrs and "content" in tag.attrs:
+                metas[tag.attrs["property"]] = tag.attrs["content"]
+        return metas
+    except Exception as e:
+        return f"Error al obtener meta tags: {e}"
+
+def detect_technology(domain):
+    """Detecta tecnologías básicas a partir de headers y scripts JS."""
+    tech = {}
+    headers = get_headers(domain)
+    if isinstance(headers, dict):
+        server = headers.get("Server")
+        x_powered = headers.get("X-Powered-By")
+        if server:
+            tech["Server"] = server
+        if x_powered:
+            tech["X-Powered-By"] = x_powered
+
+    # Revisamos scripts JS del HTML (solo los primeros 10)
+    try:
+        response = requests.get(f"http://{domain}", timeout=5)
+        soup = BeautifulSoup(response.text, "html.parser")
+        scripts = [script.get("src") for script in soup.find_all("script") if script.get("src")]
+        tech["Scripts JS encontrados"] = scripts[:10]
+    except:
+        pass
+
+    return tech
+
+def analyze_domain(domain):
+    """Ejecuta todo el análisis y devuelve un diccionario con resultados."""
+    results = {}
+    results['IP'] = get_ip(domain)
+    results['HTTP Headers'] = get_headers(domain)
+    results['WHOIS Info'] = get_whois_info(domain)
+    results['Meta Tags'] = get_meta_tags(domain)
+    results['Tecnologías detectadas'] = detect_technology(domain)
+    return results
+
+# ---------------- Funciones de interfaz ----------------
+
+def display_results(domain):
+    """Muestra los resultados en la ventana de texto."""
+    results = analyze_domain(domain)
+    output_text.config(state='normal')
+    output_text.delete('1.0', tk.END)
+
+    for section, data in results.items():
+        output_text.insert(tk.END, f"=== {section} ===\n")
+        if isinstance(data, dict):
+            for k, v in data.items():
+                output_text.insert(tk.END, f"{k}: {v}\n")
+        elif isinstance(data, list):
+            for item in data:
+                output_text.insert(tk.END, f"{item}\n")
+        else:
+            output_text.insert(tk.END, f"{data}\n")
+        output_text.insert(tk.END, "\n")
+    output_text.config(state='disabled')
+
+def on_analyze_click():
+    """Función ejecutada al presionar 'Analizar'."""
+    domain = domain_entry.get().strip()
+    if not domain:
+        messagebox.showwarning("Advertencia", "Por favor, ingresa un dominio.")
+        return
+    display_results(domain)
+
+def on_clear_click():
+    """Limpia la ventana de resultados."""
+    output_text.config(state='normal')
+    output_text.delete('1.0', tk.END)
+    output_text.config(state='disabled')
+
+def toggle_dark_mode():
+    """Activa o desactiva el modo oscuro."""
+    global DARK_MODE
+    DARK_MODE = not DARK_MODE
+    if DARK_MODE:
+        root.config(bg="#2e2e2e")
+        frame_top.config(bg="#2e2e2e")
+        domain_label.config(bg="#2e2e2e", fg="white")
+        output_text.config(bg="#1e1e1e", fg="white", insertbackground="white")
+    else:
+        root.config(bg="SystemButtonFace")
+        frame_top.config(bg="SystemButtonFace")
+        domain_label.config(bg="SystemButtonFace", fg="black")
+        output_text.config(bg="white", fg="black", insertbackground="black")
+
+# ---------------- Configuración de la ventana ----------------
+
+root = tk.Tk()
+root.title("Digital Footprint Analyzer")
+root.geometry("900x600")
+root.minsize(800, 500)
+
+# Frame superior con entrada y botones
+frame_top = tk.Frame(root, pady=10)
+frame_top.pack(side=tk.TOP, fill=tk.X, padx=10)
+
+domain_label = tk.Label(frame_top, text="Dominio:")
+domain_label.pack(side=tk.LEFT)
+
+domain_entry = tk.Entry(frame_top, width=40)
+domain_entry.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
+
+analyze_button = tk.Button(frame_top, text="Analizar", command=on_analyze_click)
+analyze_button.pack(side=tk.LEFT, padx=5)
+
+clear_button = tk.Button(frame_top, text="Limpiar", command=on_clear_click)
+clear_button.pack(side=tk.LEFT, padx=5)
+
+dark_button = tk.Button(frame_top, text="Modo Oscuro", command=toggle_dark_mode)
+dark_button.pack(side=tk.LEFT, padx=5)
+
+# Área de texto para mostrar resultados
+output_text = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=100, height=30, state='disabled')
+output_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+root.mainloop()
